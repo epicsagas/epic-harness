@@ -96,9 +96,106 @@ pub struct ControlDirective {
     pub generation: u64,
 }
 
+impl ControlDirective {
+    /// True when the directive addresses this agent (its id, `"all"`, or no target).
+    pub fn targets(&self, agent_id: &str) -> bool {
+        self.target.as_deref() == Some(agent_id)
+            || self.target.as_deref() == Some("all")
+            || self.target.is_none()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub enum BlockKind {
+    RunCancelled,
+    AgentCancelled,
+    Paused,
+    DirectiveCancelled,
+}
+
+/// Why an Agent spawn is refused (see `spawn_block`).
+#[derive(Debug, Clone, PartialEq)]
+pub struct SpawnBlock {
+    pub kind: BlockKind,
+    pub run_id: String,
+    /// Directive kinds only.
+    pub generation: Option<u64>,
+    /// Directive target as written; None means all. Directive kinds only.
+    pub target: Option<String>,
+    /// Directive message, trimmed; None when absent or empty.
+    pub message: Option<String>,
+    /// `iso_from_secs(parse(run.updated_at) + RUN_IDLE_SECS)`
+    pub expires_at: String,
+}
+
+impl SpawnBlock {
+    /// Deny reason lines without the "[orchestrator] " tag.
+    pub fn reason_lines(&self, agent_id: &str) -> Vec<String> {
+        let run_id = &self.run_id;
+        let gen_target = format!(
+            "gen {}, target {}",
+            self.generation.unwrap_or_default(),
+            self.target.as_deref().unwrap_or("all")
+        );
+        let (first, lift) = match self.kind {
+            BlockKind::RunCancelled => (
+                format!(
+                    "BLOCKED: agent {agent_id} not started: orchestration run {run_id} was cancelled by the user (/intervene cancel all)."
+                ),
+                "all",
+            ),
+            BlockKind::AgentCancelled => (
+                format!(
+                    "BLOCKED: agent {agent_id} not started: it was cancelled by the user in run {run_id} (/intervene cancel {agent_id})."
+                ),
+                agent_id,
+            ),
+            BlockKind::Paused => (
+                format!(
+                    "BLOCKED: agent {agent_id} not started: paused by user directive ({gen_target})."
+                ),
+                self.directive_lift(agent_id),
+            ),
+            BlockKind::DirectiveCancelled => (
+                format!(
+                    "BLOCKED: agent {agent_id} not started: cancelled by user directive ({gen_target})."
+                ),
+                self.directive_lift(agent_id),
+            ),
+        };
+        let mut lines = vec![first];
+        if let Some(message) = &self.message {
+            let message: String = message.chars().take(200).collect();
+            lines.push(format!("Reason: {message}"));
+        }
+        lines.push(format!(
+            "To lift: the user runs /intervene resume {lift}. Otherwise the block ends by itself after 2 hours without run activity (earliest {}).",
+            self.expires_at
+        ));
+        lines.push(
+            "Do not retry this spawn and do not run /intervene yourself; tell the user."
+                .to_string(),
+        );
+        lines
+    }
+
+    /// `{x}` when the directive names this agent, else `all`.
+    fn directive_lift<'a>(&'a self, agent_id: &'a str) -> &'a str {
+        if self.target.as_deref() == Some(agent_id) {
+            agent_id
+        } else {
+            "all"
+        }
+    }
+}
+
 // ── Constants ─────────────────────────────────────────
 
 pub const MAX_CONCURRENT_AGENTS: usize = 6;
+/// A run with no activity for this long holds no pause or cancel block.
+pub const RUN_IDLE_SECS: u64 = 7200;
+/// Run timestamps further than this in the future are invalid (run treated as not live).
+const CLOCK_SKEW_SECS: u64 = 300;
 const RUN_FILE: &str = "run.json";
 const CONTROL_FILE: &str = "control.json";
 
@@ -355,10 +452,121 @@ fn acquire_lock(lock_path: &Path) -> io::Result<fs::File> {
     Ok(file)
 }
 
+fn mtime_secs(path: &Path) -> Option<u64> {
+    fs::metadata(path)
+        .and_then(|m| m.modified())
+        .ok()?
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|d| d.as_secs())
+}
+
+/// Last activity of the run in epoch seconds, as far as blocks are concerned;
+/// 0 when unknown (malformed `updated_at`).
+///
+/// A timestamp beyond the clock skew allowance (a model-written local time
+/// without offset, a wrong clock) is replaced by the run.json mtime, which
+/// comes from the harness host clock. An aborted run with a bound control.json
+/// is anchored at the earlier of that and control.json's mtime: denied spawns
+/// rewrite run.json, and they must not extend a cancel. Without a bound
+/// control.json there is no such cap, so a future `updated_at` on an aborted
+/// run is unknown (0, not live) instead of falling back to that mtime.
+fn run_activity_secs(base: &Path, run: &OrchestrationRun, now: u64) -> u64 {
+    let t = epoch_secs_from_iso(&run.updated_at);
+    if t == 0 {
+        return 0;
+    }
+    let bound_control = if run.status == RunStatus::Aborted && control_is_bound(base, run) {
+        mtime_secs(&control_file(base))
+    } else {
+        None
+    };
+    let t = if t > now + CLOCK_SKEW_SECS {
+        if run.status == RunStatus::Aborted && bound_control.is_none() {
+            return 0;
+        }
+        mtime_secs(&run_file(base)).unwrap_or(0)
+    } else {
+        t
+    };
+    bound_control.map_or(t, |c| t.min(c))
+}
+
+/// Earliest time the run's blocks end by themselves.
+pub(crate) fn run_expiry(base: &Path, run: &OrchestrationRun, now: u64) -> String {
+    crate::shared::helpers::iso_from_secs(run_activity_secs(base, run, now) + RUN_IDLE_SECS)
+}
+
+/// A run is live while its last activity is at most `RUN_IDLE_SECS` old.
+/// Derived, never persisted: a malformed `updated_at` is not live. Agents do
+/// not count as activity: every spawn, completion and intervention writes
+/// `updated_at`, so a block set by an intervention lasts 2h from then.
+pub fn is_live(base: &Path, run: &OrchestrationRun, now: u64) -> bool {
+    let t = run_activity_secs(base, run, now);
+    t != 0 && t <= now + CLOCK_SKEW_SECS && now.saturating_sub(t) <= RUN_IDLE_SECS
+}
+
+/// control.json counts for a run only when it was written during that run:
+/// its mtime (whole seconds) is at or after `run.created_at`.
+pub fn control_is_bound(base: &Path, run: &OrchestrationRun) -> bool {
+    let created = epoch_secs_from_iso(&run.created_at);
+    created != 0 && mtime_secs(&control_file(base)).is_some_and(|m| m >= created)
+}
+
+/// Whether an Agent spawn is blocked. Pure apart from reading run.json,
+/// control.json and its mtime. Never writes.
+pub fn spawn_block(base: &Path, agent_id: &str, now: u64) -> Option<SpawnBlock> {
+    let run = read_run(base)?;
+    if !is_live(base, &run, now) {
+        return None;
+    }
+    let directive = if control_is_bound(base, &run) {
+        read_control(base)
+    } else {
+        None
+    };
+    let block = |kind, d: Option<&ControlDirective>| SpawnBlock {
+        kind,
+        run_id: run.id.clone(),
+        generation: d.map(|d| d.generation),
+        target: d.and_then(|d| d.target.clone()),
+        message: d
+            .and_then(|d| d.message.as_deref())
+            .map(str::trim)
+            .filter(|m| !m.is_empty())
+            .map(String::from),
+        expires_at: run_expiry(base, &run, now),
+    };
+    let targeted = directive.as_ref().filter(|d| d.targets(agent_id));
+    let resumes = targeted.is_some_and(|d| d.action == ControlAction::Resume);
+
+    if run.status == RunStatus::Aborted {
+        let lifted = directive.as_ref().is_some_and(|d| {
+            d.action == ControlAction::Resume && matches!(d.target.as_deref(), None | Some("all"))
+        });
+        return (!lifted).then(|| block(BlockKind::RunCancelled, None));
+    }
+    if run
+        .agents
+        .iter()
+        .any(|a| a.id == agent_id && a.status == AgentStatus::Cancelled)
+    {
+        return (!resumes).then(|| block(BlockKind::AgentCancelled, None));
+    }
+    let d = targeted?;
+    match d.action {
+        ControlAction::Pause => Some(block(BlockKind::Paused, Some(d))),
+        ControlAction::Cancel => Some(block(BlockKind::DirectiveCancelled, Some(d))),
+        ControlAction::Redirect | ControlAction::Resume => None,
+    }
+}
+
 /// Upsert an agent into an auto-created run.json.
 ///
 /// If `run.json` does not exist, creates a new auto-run with id `auto-{timestamp}`.
-/// If it exists, adds the agent or updates its status.
+/// A `Running` request also starts a new auto-run when the existing one is
+/// complete, aborted or idle (not live): the previous run.json is replaced.
+/// Otherwise it adds the agent or updates its status.
 /// Uses advisory file locking to prevent TOCTOU races during concurrent agent spawns.
 /// Returns the agent ID used.
 pub fn upsert_agent_to_run(
@@ -378,8 +586,16 @@ pub fn upsert_agent_to_run(
     let now = crate::shared::helpers::now_iso();
 
     let mut run = match read_run(base) {
-        Some(r) => r,
-        None => OrchestrationRun {
+        // Only a `Running` request rotates (I2); anything else records into the
+        // existing run. An aborted run is replaced only by rotation (I1).
+        Some(r)
+            if status != AgentStatus::Running
+                || (!matches!(r.status, RunStatus::Complete | RunStatus::Aborted)
+                    && is_live(base, &r, epoch_secs_now())) =>
+        {
+            r
+        }
+        _ => OrchestrationRun {
             id: {
                 let compact = now.replace(['-', ':'], "").replace('T', "-");
                 let truncated: String = compact.chars().take(19).collect();
@@ -393,12 +609,15 @@ pub fn upsert_agent_to_run(
         },
     };
 
-    // A user-cancelled agent only ever stays Cancelled: a late Done, Blocked or
-    // Pending (or a respawn's Running) must not undo `/intervene cancel`.
-    let status = if run
-        .agents
-        .iter()
-        .any(|a| a.id == agent_id && a.status == AgentStatus::Cancelled)
+    // A user-cancelled agent stays Cancelled for every request except `Running`:
+    // `run_pre` requests it only when the gate allowed the spawn (I3), i.e. the
+    // user resumed the agent (I4). A late Done, Blocked or Pending must not
+    // undo `/intervene cancel`.
+    let status = if status != AgentStatus::Running
+        && run
+            .agents
+            .iter()
+            .any(|a| a.id == agent_id && a.status == AgentStatus::Cancelled)
     {
         AgentStatus::Cancelled
     } else {
@@ -444,13 +663,15 @@ pub fn upsert_agent_to_run(
         });
     }
 
-    // Check if all agents are done; a new start reopens a completed run.
-    if is_run_complete(&run) {
-        run.status = RunStatus::Complete;
-    } else if status == AgentStatus::Running && run.status == RunStatus::Complete {
-        run.status = RunStatus::Running;
+    // An aborted run keeps its status and `updated_at` (I1): recomputing or
+    // bumping either would lift `cancel all` early or extend it on every denied
+    // retry.
+    if run.status != RunStatus::Aborted {
+        if is_run_complete(&run) {
+            run.status = RunStatus::Complete;
+        }
+        run.updated_at = now.clone();
     }
-    run.updated_at = now.clone();
     write_run(base, &run)?;
 
     // Write agent status file for dashboard only when status meaningfully changes
@@ -508,6 +729,10 @@ pub fn complete_and_unblock(
     let Some(mut run) = read_run(base) else {
         return Ok(vec![]);
     };
+    // Aborted stays aborted (I1); the caller's upsert already recorded the agent.
+    if run.status == RunStatus::Aborted {
+        return Ok(vec![]);
+    }
     let now = crate::shared::helpers::now_iso();
 
     for agent in run.agents.iter_mut().filter(|a| a.id == agent_id) {
@@ -557,6 +782,10 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
     if !run.id.starts_with("auto-") {
         return;
     }
+    // Aborted stays aborted and keeps its `updated_at` (I1).
+    if run.status == RunStatus::Aborted {
+        return;
+    }
 
     let current_epoch = epoch_secs_now();
     let now = crate::shared::helpers::now_iso();
@@ -583,8 +812,8 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
     let run_epoch = epoch_secs_from_iso(&run.updated_at);
     let stale_complete =
         run.status == RunStatus::Complete && current_epoch.saturating_sub(run_epoch) > 3600;
-    let stale_running =
-        run.status == RunStatus::Running && current_epoch.saturating_sub(run_epoch) > 7200;
+    // Same liveness as the gate and rotation.
+    let stale_running = run.status == RunStatus::Running && !is_live(base, &run, current_epoch);
 
     // Also mark as complete if all agents are now done
     if run.status == RunStatus::Running && is_run_complete(&run) {
@@ -592,8 +821,9 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
         any_agent_cleaned = true;
     }
 
+    // Cleanup is not run activity: `updated_at` stays, else a session start
+    // would make an expired run live again and revive its pause or cancel.
     if any_agent_cleaned {
-        run.updated_at = now;
         let _ = write_run(base, &run);
     }
 
@@ -604,7 +834,6 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
     // Mark as complete if running and stale
     if stale_running {
         run.status = RunStatus::Complete;
-        run.updated_at = crate::shared::helpers::now_iso();
         let _ = write_run(base, &run);
     }
 
@@ -635,13 +864,41 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
 }
 
 /// Parse an ISO-8601 timestamp to epoch seconds.
-/// Reuses the accurate `days_since_epoch` logic from mem::store::util.
+/// Reuses the accurate `days_since_epoch` logic from mem::store::util for the
+/// `YYYY-MM-DDThh:mm:ss` part, then honors optional fractional seconds and a
+/// `Z` or `+hh:mm` / `-hh:mm` offset (what `date -Iseconds` writes). No suffix
+/// means UTC.
 fn epoch_secs_from_iso(iso: &str) -> u64 {
-    crate::mem::store::parse_iso_to_secs(iso)
+    let utc_as_written = crate::mem::store::parse_iso_to_secs(iso);
+    if utc_as_written == 0 {
+        return 0;
+    }
+    let rest = iso.get(19..).unwrap_or("");
+    let rest = match rest.strip_prefix('.') {
+        Some(frac) => frac.trim_start_matches(|c: char| c.is_ascii_digit()),
+        None => rest,
+    };
+    let (west, offset) = match rest.split_at_checked(1) {
+        Some(("+", o)) => (false, o),
+        Some(("-", o)) => (true, o),
+        _ => return utc_as_written,
+    };
+    let digits = offset.replacen(':', "", 1);
+    let number = |range| digits.get(range).and_then(|d: &str| d.parse::<u64>().ok());
+    let secs = match (digits.len(), number(0..2), number(2..4)) {
+        (2, Some(h), _) => h * 3600,
+        (4, Some(h), Some(m)) => h * 3600 + m * 60,
+        _ => return utc_as_written,
+    };
+    if west {
+        utc_as_written + secs
+    } else {
+        utc_as_written.saturating_sub(secs)
+    }
 }
 
 /// Current time as approximate epoch seconds.
-fn epoch_secs_now() -> u64 {
+pub(crate) fn epoch_secs_now() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .unwrap_or_default()
@@ -1227,27 +1484,36 @@ mod tests {
     }
 
     #[test]
-    fn upsert_running_agent_reopens_completed_run() {
+    fn upsert_running_agent_after_complete_starts_new_run() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
         upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
         upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Done).unwrap();
-        let run = read_run(base).unwrap();
+        let mut run = read_run(base).unwrap();
         assert_eq!(run.status, RunStatus::Complete);
         assert!(run.agents[0].completed_at.is_some());
+        // Same-second ids collide, so give the finished run a distinct id.
+        run.id = "auto-old".to_string();
+        write_run(base, &run).unwrap();
 
-        // A new agent starts: the run is running again.
+        // A new agent starts after completion: a new run, not a reopened one.
         upsert_agent_to_run(base, "b", "t", "builder", AgentStatus::Running).unwrap();
-        assert_eq!(read_run(base).unwrap().status, RunStatus::Running);
-
-        // Finish it, then restart the first agent: stale completed_at cleared.
-        upsert_agent_to_run(base, "b", "t", "builder", AgentStatus::Done).unwrap();
-        assert_eq!(read_run(base).unwrap().status, RunStatus::Complete);
-        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
         let run = read_run(base).unwrap();
+        assert_ne!(run.id, "auto-old");
+        assert!(run.id.starts_with("auto-"));
         assert_eq!(run.status, RunStatus::Running);
-        let a = run.agents.iter().find(|x| x.id == "a").unwrap();
-        assert!(a.completed_at.is_none(), "restart clears completed_at");
+        assert_eq!(agent_ids(&run), ["b"]);
+
+        // Within a running run a restart still clears completed_at.
+        upsert_agent_to_run(base, "c", "t", "builder", AgentStatus::Running).unwrap();
+        upsert_agent_to_run(base, "b", "t", "builder", AgentStatus::Done).unwrap();
+        let id = read_run(base).unwrap().id;
+        upsert_agent_to_run(base, "b", "t", "builder", AgentStatus::Running).unwrap();
+        let run = read_run(base).unwrap();
+        assert_eq!(run.id, id, "a restart inside a running run does not rotate");
+        assert_eq!(agent_ids(&run), ["b", "c"]);
+        let b = run.agents.iter().find(|x| x.id == "b").unwrap();
+        assert!(b.completed_at.is_none(), "restart clears completed_at");
     }
 
     #[test]
@@ -1265,7 +1531,6 @@ mod tests {
             AgentStatus::Pending,
             AgentStatus::Done,
             AgentStatus::Failed,
-            AgentStatus::Running,
         ] {
             upsert_agent_to_run(base, "a", "t", "builder", late.clone()).unwrap();
             let run = read_run(base).unwrap();
@@ -1277,6 +1542,33 @@ mod tests {
                 "{late:?}"
             );
         }
+    }
+
+    /// I4: `Running` is requested only when the gate allowed the spawn, i.e.
+    /// the user resumed the agent, so it un-cancels.
+    #[test]
+    fn running_upsert_uncancels() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        let mut run = read_run(base).unwrap();
+        run.agents[0].status = AgentStatus::Cancelled;
+        write_run(base, &run).unwrap();
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Blocked).unwrap();
+        assert_eq!(
+            read_agent_status(base, "a").unwrap().status,
+            AgentStatus::Cancelled
+        );
+
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        let after = read_run(base).unwrap();
+        assert_eq!(after.id, run.id, "same live run");
+        assert_eq!(after.agents[0].status, AgentStatus::Running);
+        assert!(after.agents[0].completed_at.is_none());
+        assert_eq!(
+            read_agent_status(base, "a").unwrap().status,
+            AgentStatus::Running
+        );
     }
 
     #[test]
@@ -1420,11 +1712,19 @@ mod tests {
     fn complete_and_unblock_concurrent_with_upserts_loses_nothing() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path().to_path_buf();
-        init_run(
-            &base,
-            &make_run("r", vec![("seed", AgentStatus::Running)], vec![]),
-        )
-        .unwrap();
+        // A live run (fresh timestamps) that `hold` keeps incomplete: an idle or
+        // completed run would rotate on the next `Running` upsert and drop `seed`.
+        let mut run = make_run(
+            "r",
+            vec![
+                ("seed", AgentStatus::Running),
+                ("hold", AgentStatus::Running),
+            ],
+            vec![],
+        );
+        run.created_at = crate::shared::helpers::now_iso();
+        run.updated_at = run.created_at.clone();
+        init_run(&base, &run).unwrap();
         let handles: Vec<_> = (0..16)
             .map(|i| {
                 let base = base.clone();
@@ -1448,7 +1748,7 @@ mod tests {
             h.join().unwrap();
         }
         let run = read_run(&base).unwrap();
-        assert_eq!(run.agents.len(), 16);
+        assert_eq!(run.agents.len(), 17);
         assert_eq!(agent_status_of(&base, "seed"), AgentStatus::Done);
     }
 
@@ -1573,5 +1873,927 @@ mod tests {
         fs::write(&path, bytes).unwrap();
         auto_cleanup_stale_runs(tmp.path());
         assert_eq!(agent_status_of(tmp.path(), "a1"), AgentStatus::Running);
+    }
+
+    // ── Spawn gate and run lifecycle ──
+
+    use crate::shared::helpers::iso_from_secs;
+
+    fn agent_ids(run: &OrchestrationRun) -> Vec<&str> {
+        run.agents.iter().map(|a| a.id.as_str()).collect()
+    }
+
+    /// Set a file's mtime to `secs` since the epoch (std only).
+    fn set_mtime(path: &Path, secs: u64) {
+        fs::OpenOptions::new()
+            .write(true)
+            .open(path)
+            .unwrap()
+            .set_modified(std::time::UNIX_EPOCH + std::time::Duration::from_secs(secs))
+            .unwrap();
+    }
+
+    /// Write run.json (id `auto-r1`) with `created_ago` / `updated_ago`
+    /// seconds before `now`.
+    fn live_run(
+        base: &Path,
+        now: u64,
+        status: RunStatus,
+        created_ago: u64,
+        updated_ago: u64,
+        agents: &[(&str, AgentStatus)],
+    ) -> OrchestrationRun {
+        let mut run = make_run("auto-r1", agents.to_vec(), vec![]);
+        run.status = status;
+        run.created_at = iso_from_secs(now - created_ago);
+        run.updated_at = iso_from_secs(now - updated_ago);
+        fs::create_dir_all(orchestrator_dir(base)).unwrap();
+        write_run(base, &run).unwrap();
+        run
+    }
+
+    /// Write control.json (generation 1) and pin its mtime to `mtime`.
+    fn put_control(
+        base: &Path,
+        action: ControlAction,
+        target: Option<&str>,
+        message: Option<&str>,
+        mtime: u64,
+    ) {
+        let directive = ControlDirective {
+            action,
+            target: target.map(String::from),
+            message: message.map(String::from),
+            generation: 1,
+        };
+        write_control(base, &directive).unwrap();
+        set_mtime(&control_file(base), mtime);
+    }
+
+    fn kind_of(base: &Path, id: &str, now: u64) -> Option<BlockKind> {
+        spawn_block(base, id, now).map(|b| b.kind)
+    }
+
+    // Done-when 1: a stale cancel never blocks a later run.
+
+    #[test]
+    fn stale_abort_never_blocks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        live_run(
+            base,
+            now,
+            RunStatus::Aborted,
+            8000,
+            7201,
+            &[("a", AgentStatus::Running)],
+        );
+        put_control(base, ControlAction::Cancel, Some("all"), None, now);
+        for id in ["a", "zzz", "other"] {
+            assert_eq!(spawn_block(base, id, now), None, "{id}");
+        }
+        upsert_agent_to_run(base, "new", "t", "builder", AgentStatus::Running).unwrap();
+        let run = read_run(base).unwrap();
+        assert_ne!(run.id, "auto-r1");
+        assert_eq!(run.status, RunStatus::Running);
+        assert_eq!(agent_ids(&run), ["new"]);
+    }
+
+    #[test]
+    fn cancel_from_previous_run_is_unbound() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        let run = live_run(
+            base,
+            now,
+            RunStatus::Running,
+            0,
+            0,
+            &[("a", AgentStatus::Running)],
+        );
+        for action in [ControlAction::Cancel, ControlAction::Pause] {
+            put_control(base, action, Some("all"), None, now - 60);
+            assert!(!control_is_bound(base, &run));
+            assert_eq!(spawn_block(base, "a", now), None);
+        }
+        // Written in the run's own second: bound.
+        put_control(base, ControlAction::Pause, Some("all"), None, now);
+        assert!(control_is_bound(base, &run));
+        assert_eq!(kind_of(base, "a", now), Some(BlockKind::Paused));
+    }
+
+    #[test]
+    fn cancelled_id_free_in_new_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        live_run(
+            base,
+            now,
+            RunStatus::Complete,
+            8000,
+            7201,
+            &[("x", AgentStatus::Cancelled)],
+        );
+        assert_eq!(spawn_block(base, "x", now), None);
+        upsert_agent_to_run(base, "x", "t", "builder", AgentStatus::Running).unwrap();
+        let run = read_run(base).unwrap();
+        assert_ne!(run.id, "auto-r1");
+        assert_eq!(agent_ids(&run), ["x"]);
+        assert_eq!(run.agents[0].status, AgentStatus::Running);
+    }
+
+    #[test]
+    fn ttl_boundary() {
+        let now = epoch_secs_now();
+        for kind in [
+            BlockKind::RunCancelled,
+            BlockKind::AgentCancelled,
+            BlockKind::Paused,
+            BlockKind::DirectiveCancelled,
+        ] {
+            for (age, blocked) in [(7200u64, true), (7201, false)] {
+                let tmp = tempfile::tempdir().unwrap();
+                let base = tmp.path();
+                let (created, updated) = (age + 100, age);
+                match kind {
+                    BlockKind::RunCancelled => {
+                        live_run(base, now, RunStatus::Aborted, created, updated, &[]);
+                    }
+                    BlockKind::AgentCancelled => {
+                        live_run(
+                            base,
+                            now,
+                            RunStatus::Running,
+                            created,
+                            updated,
+                            &[("x", AgentStatus::Cancelled)],
+                        );
+                    }
+                    BlockKind::Paused | BlockKind::DirectiveCancelled => {
+                        live_run(
+                            base,
+                            now,
+                            RunStatus::Running,
+                            created,
+                            updated,
+                            &[("x", AgentStatus::Running)],
+                        );
+                        let action = if kind == BlockKind::Paused {
+                            ControlAction::Pause
+                        } else {
+                            ControlAction::Cancel
+                        };
+                        put_control(base, action, Some("all"), None, now);
+                    }
+                }
+                assert_eq!(
+                    kind_of(base, "x", now),
+                    blocked.then(|| kind.clone()),
+                    "{kind:?} at age {age}"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn future_or_malformed_timestamps_fail_open() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        let mut run = live_run(
+            base,
+            now,
+            RunStatus::Aborted,
+            100,
+            0,
+            &[("x", AgentStatus::Running)],
+        );
+        // Malformed: not live whatever the files say.
+        run.updated_at = "garbage".to_string();
+        write_run(base, &run).unwrap();
+        assert!(!is_live(base, &run, now));
+        assert_eq!(spawn_block(base, "x", now), None);
+
+        // Future beyond the skew allowance: an aborted run without a bound
+        // control.json is not live, and for other runs the run.json mtime
+        // stands in, so an old mtime means expired (a future time cannot pin a
+        // block forever).
+        let just_too_far = iso_from_secs(now + 301);
+        for future in ["2099-01-01T00:00:00Z", just_too_far.as_str()] {
+            run.updated_at = future.to_string();
+            write_run(base, &run).unwrap();
+            set_mtime(&run_file(base), now - 3 * 3600);
+            assert!(!is_live(base, &run, now), "{future}");
+            assert_eq!(spawn_block(base, "x", now), None, "{future}");
+        }
+        // Within the clock skew allowance the timestamp is trusted.
+        run.updated_at = iso_from_secs(now + 300);
+        assert!(is_live(base, &run, now));
+
+        // Malformed created_at: control.json is unbound.
+        let mut run = live_run(
+            base,
+            now,
+            RunStatus::Running,
+            100,
+            0,
+            &[("x", AgentStatus::Running)],
+        );
+        put_control(base, ControlAction::Pause, Some("all"), None, now);
+        run.created_at = "garbage".to_string();
+        write_run(base, &run).unwrap();
+        assert!(!control_is_bound(base, &run));
+        assert_eq!(spawn_block(base, "x", now), None);
+    }
+
+    // Done-when 2: the documented flows block while meant to.
+
+    fn pause_fixture(base: &Path, now: u64, target: Option<&str>) {
+        live_run(
+            base,
+            now,
+            RunStatus::Running,
+            100,
+            10,
+            &[("x", AgentStatus::Running), ("y", AgentStatus::Running)],
+        );
+        put_control(base, ControlAction::Pause, target, None, now);
+    }
+
+    #[test]
+    fn pause_agent_blocks_only_that_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = epoch_secs_now();
+        pause_fixture(tmp.path(), now, Some("x"));
+        assert_eq!(kind_of(tmp.path(), "x", now), Some(BlockKind::Paused));
+        assert_eq!(kind_of(tmp.path(), "y", now), None);
+    }
+
+    #[test]
+    fn pause_all_blocks_every_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = epoch_secs_now();
+        pause_fixture(tmp.path(), now, Some("all"));
+        for id in ["x", "y", "unknown"] {
+            assert_eq!(
+                kind_of(tmp.path(), id, now),
+                Some(BlockKind::Paused),
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn pause_with_no_target_blocks_every_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let now = epoch_secs_now();
+        pause_fixture(tmp.path(), now, None);
+        for id in ["x", "y", "unknown"] {
+            assert_eq!(
+                kind_of(tmp.path(), id, now),
+                Some(BlockKind::Paused),
+                "{id}"
+            );
+        }
+    }
+
+    #[test]
+    fn cancel_agent_blocks_respawn_even_after_other_directive() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        live_run(
+            base,
+            now,
+            RunStatus::Running,
+            100,
+            10,
+            &[("x", AgentStatus::Cancelled), ("y", AgentStatus::Running)],
+        );
+        put_control(base, ControlAction::Cancel, Some("x"), None, now);
+        assert_eq!(kind_of(base, "x", now), Some(BlockKind::AgentCancelled));
+        // The single control slot now holds an unrelated directive.
+        put_control(base, ControlAction::Pause, Some("y"), None, now);
+        assert_eq!(kind_of(base, "x", now), Some(BlockKind::AgentCancelled));
+        assert_eq!(kind_of(base, "y", now), Some(BlockKind::Paused));
+    }
+
+    #[test]
+    fn cancel_directive_without_run_mark_blocks() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        live_run(
+            base,
+            now,
+            RunStatus::Running,
+            100,
+            10,
+            &[("x", AgentStatus::Running)],
+        );
+        put_control(
+            base,
+            ControlAction::Cancel,
+            Some("x"),
+            Some("  stop  "),
+            now,
+        );
+        let block = spawn_block(base, "x", now).unwrap();
+        assert_eq!(block.kind, BlockKind::DirectiveCancelled);
+        assert_eq!(block.generation, Some(1));
+        assert_eq!(block.target.as_deref(), Some("x"));
+        assert_eq!(block.message.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn cancel_all_blocks_every_agent() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        live_run(
+            base,
+            now,
+            RunStatus::Aborted,
+            500,
+            100,
+            &[("a", AgentStatus::Running)],
+        );
+        for id in ["a", "new"] {
+            assert_eq!(
+                kind_of(base, id, now),
+                Some(BlockKind::RunCancelled),
+                "{id}"
+            );
+        }
+    }
+
+    /// I1: three code paths used to flip an aborted run to complete or bump
+    /// its `updated_at`.
+    #[test]
+    fn aborted_run_is_sticky() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        // `a` has neither start nor heartbeat, so cleanup would mark it done.
+        live_run(
+            base,
+            now,
+            RunStatus::Aborted,
+            500,
+            100,
+            &[("a", AgentStatus::Running)],
+        );
+        let before = read_run(base).unwrap();
+        let bytes = fs::read(run_file(base)).unwrap();
+        let sticky = || {
+            let run = read_run(base).unwrap();
+            assert_eq!(run.status, RunStatus::Aborted);
+            assert_eq!(run.updated_at, before.updated_at);
+        };
+
+        auto_cleanup_stale_runs(base);
+        assert_eq!(
+            fs::read(run_file(base)).unwrap(),
+            bytes,
+            "cleanup leaves run.json alone"
+        );
+
+        upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Done).unwrap();
+        sticky();
+        assert_eq!(
+            complete_and_unblock(base, "a", AgentStatus::Done).unwrap(),
+            Vec::<String>::new()
+        );
+        sticky();
+        upsert_agent_to_run(base, "fresh", "t", "builder", AgentStatus::Blocked).unwrap();
+        sticky();
+        let run = read_run(base).unwrap();
+        let fresh = run.agents.iter().find(|a| a.id == "fresh").unwrap();
+        assert_eq!(
+            fresh.status,
+            AgentStatus::Blocked,
+            "the denied spawn is recorded"
+        );
+    }
+
+    #[test]
+    fn sole_cancelled_agent_stays_blocked_after_run_completes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        upsert_agent_to_run(base, "x", "t", "builder", AgentStatus::Running).unwrap();
+        let mut run = read_run(base).unwrap();
+        run.agents[0].status = AgentStatus::Cancelled;
+        write_run(base, &run).unwrap();
+        upsert_agent_to_run(base, "x", "t", "builder", AgentStatus::Blocked).unwrap();
+        assert_eq!(read_run(base).unwrap().status, RunStatus::Complete);
+        assert_eq!(
+            kind_of(base, "x", epoch_secs_now()),
+            Some(BlockKind::AgentCancelled)
+        );
+    }
+
+    #[test]
+    fn redirect_and_resume_never_block() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        live_run(
+            base,
+            now,
+            RunStatus::Running,
+            100,
+            10,
+            &[("x", AgentStatus::Running)],
+        );
+        for action in [ControlAction::Redirect, ControlAction::Resume] {
+            for target in [Some("all"), Some("x"), None] {
+                put_control(base, action.clone(), target, Some("go"), now);
+                assert_eq!(spawn_block(base, "x", now), None, "{action:?} {target:?}");
+            }
+        }
+    }
+
+    // Done-when 3: a blocked user always has a documented way out.
+
+    #[test]
+    fn resume_all_lifts_abort() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        live_run(
+            base,
+            now,
+            RunStatus::Aborted,
+            500,
+            100,
+            &[("a", AgentStatus::Running)],
+        );
+        // A resume for one agent does not lift a cancelled run.
+        put_control(base, ControlAction::Resume, Some("a"), None, now);
+        assert_eq!(kind_of(base, "a", now), Some(BlockKind::RunCancelled));
+        for target in [Some("all"), None] {
+            put_control(base, ControlAction::Resume, target, None, now);
+            assert_eq!(spawn_block(base, "a", now), None, "{target:?}");
+            assert_eq!(spawn_block(base, "new", now), None, "{target:?}");
+        }
+        upsert_agent_to_run(base, "new", "t", "builder", AgentStatus::Running).unwrap();
+        let run = read_run(base).unwrap();
+        assert_ne!(run.id, "auto-r1");
+        assert_eq!(run.status, RunStatus::Running);
+        assert_eq!(agent_ids(&run), ["new"]);
+    }
+
+    #[test]
+    fn resume_agent_lifts_agent_cancel() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        live_run(
+            base,
+            now,
+            RunStatus::Running,
+            100,
+            10,
+            &[("x", AgentStatus::Cancelled), ("y", AgentStatus::Running)],
+        );
+        // A denied respawn is pinned to Cancelled, including its status file.
+        upsert_agent_to_run(base, "x", "t", "builder", AgentStatus::Blocked).unwrap();
+        assert_eq!(
+            read_agent_status(base, "x").unwrap().status,
+            AgentStatus::Cancelled
+        );
+        assert_eq!(
+            kind_of(base, "x", epoch_secs_now()),
+            Some(BlockKind::AgentCancelled)
+        );
+
+        put_control(
+            base,
+            ControlAction::Resume,
+            Some("x"),
+            None,
+            epoch_secs_now(),
+        );
+        assert_eq!(spawn_block(base, "x", epoch_secs_now()), None);
+        upsert_agent_to_run(base, "x", "t", "builder", AgentStatus::Running).unwrap();
+        let run = read_run(base).unwrap();
+        assert_eq!(run.id, "auto-r1", "same live run");
+        let x = run.agents.iter().find(|a| a.id == "x").unwrap();
+        assert_eq!(x.status, AgentStatus::Running);
+        assert!(x.completed_at.is_none());
+        assert_eq!(
+            read_agent_status(base, "x").unwrap().status,
+            AgentStatus::Running
+        );
+    }
+
+    #[test]
+    fn resume_all_lifts_agent_cancel_and_pause() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        live_run(
+            base,
+            now,
+            RunStatus::Running,
+            100,
+            10,
+            &[("x", AgentStatus::Cancelled), ("y", AgentStatus::Running)],
+        );
+        put_control(base, ControlAction::Pause, Some("all"), None, now);
+        assert_eq!(kind_of(base, "x", now), Some(BlockKind::AgentCancelled));
+        assert_eq!(kind_of(base, "y", now), Some(BlockKind::Paused));
+        put_control(base, ControlAction::Resume, Some("all"), None, now);
+        assert_eq!(spawn_block(base, "x", now), None);
+        assert_eq!(spawn_block(base, "y", now), None);
+    }
+
+    /// Exhaustive over the finite domain (no property-test crate).
+    #[test]
+    fn spawn_gate_properties() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        let statuses = [
+            RunStatus::Running,
+            RunStatus::Paused,
+            RunStatus::Complete,
+            RunStatus::Aborted,
+        ];
+        let x_states = [
+            None,
+            Some(AgentStatus::Running),
+            Some(AgentStatus::Cancelled),
+        ];
+        let actions = [
+            None,
+            Some(ControlAction::Pause),
+            Some(ControlAction::Cancel),
+            Some(ControlAction::Redirect),
+            Some(ControlAction::Resume),
+        ];
+        let targets = [None, Some("all"), Some("x"), Some("y")];
+        for status in &statuses {
+            for x_state in &x_states {
+                for age in [0u64, 7200, 7201] {
+                    let agents = match x_state {
+                        Some(s) => vec![("x", s.clone())],
+                        None => vec![("other", AgentStatus::Running)],
+                    };
+                    let created_ago = age + 100;
+                    live_run(base, now, status.clone(), created_ago, age, &agents);
+                    let _ = fs::remove_file(control_file(base));
+                    let baseline = spawn_block(base, "x", now);
+                    if age == 7201 {
+                        assert_eq!(baseline, None);
+                    }
+                    for action in actions.iter().flatten() {
+                        for target in targets {
+                            for bound in [true, false] {
+                                let mtime = if bound { now } else { now - created_ago - 60 };
+                                put_control(base, action.clone(), target, None, mtime);
+                                let got = spawn_block(base, "x", now);
+                                let case = format!(
+                                    "{status:?} {x_state:?} age {age} {action:?} {target:?} bound {bound}"
+                                );
+                                if age == 7201 {
+                                    assert_eq!(got, None, "P1 {case}");
+                                }
+                                if !bound {
+                                    assert_eq!(got, baseline, "P2 {case}");
+                                }
+                                if bound
+                                    && *action == ControlAction::Resume
+                                    && target == Some("all")
+                                {
+                                    assert_eq!(got, None, "P3 {case}");
+                                }
+                                if let Some(b) = &got {
+                                    assert!(
+                                        b.reason_lines("x").iter().any(|l| {
+                                            l.contains("/intervene resume")
+                                                && l.contains(&b.expires_at)
+                                        }),
+                                        "P4 {case}"
+                                    );
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn reason_lines_golden() {
+        let block = |kind, target: Option<&str>, message: Option<&str>| SpawnBlock {
+            kind,
+            run_id: "auto-1".to_string(),
+            generation: Some(7),
+            target: target.map(String::from),
+            message: message.map(String::from),
+            expires_at: "2026-01-01T02:00:00Z".to_string(),
+        };
+        let lift = |who: &str| {
+            format!(
+                "To lift: the user runs /intervene resume {who}. Otherwise the block ends by itself after 2 hours without run activity (earliest 2026-01-01T02:00:00Z)."
+            )
+        };
+        let tail = "Do not retry this spawn and do not run /intervene yourself; tell the user.";
+
+        assert_eq!(
+            block(BlockKind::RunCancelled, None, None).reason_lines("x"),
+            [
+                "BLOCKED: agent x not started: orchestration run auto-1 was cancelled by the user (/intervene cancel all).".to_string(),
+                lift("all"),
+                tail.to_string(),
+            ]
+        );
+        assert_eq!(
+            block(BlockKind::AgentCancelled, None, None).reason_lines("x"),
+            [
+                "BLOCKED: agent x not started: it was cancelled by the user in run auto-1 (/intervene cancel x).".to_string(),
+                lift("x"),
+                tail.to_string(),
+            ]
+        );
+        assert_eq!(
+            block(BlockKind::Paused, Some("x"), Some("hold on")).reason_lines("x"),
+            [
+                "BLOCKED: agent x not started: paused by user directive (gen 7, target x)."
+                    .to_string(),
+                "Reason: hold on".to_string(),
+                lift("x"),
+                tail.to_string(),
+            ]
+        );
+        assert_eq!(
+            block(BlockKind::Paused, None, None).reason_lines("x"),
+            [
+                "BLOCKED: agent x not started: paused by user directive (gen 7, target all)."
+                    .to_string(),
+                lift("all"),
+                tail.to_string(),
+            ]
+        );
+        assert_eq!(
+            block(BlockKind::DirectiveCancelled, Some("y"), None).reason_lines("x"),
+            [
+                "BLOCKED: agent x not started: cancelled by user directive (gen 7, target y)."
+                    .to_string(),
+                lift("all"),
+                tail.to_string(),
+            ]
+        );
+        // Truncation counts chars, so a multibyte message cuts on a boundary.
+        let long = "\u{ac00}".repeat(250);
+        let lines =
+            block(BlockKind::DirectiveCancelled, Some("all"), Some(&long)).reason_lines("x");
+        assert_eq!(lines[1], format!("Reason: {}", "\u{ac00}".repeat(200)));
+    }
+
+    // Upsert regressions.
+
+    #[test]
+    fn concurrent_starts_rotate_once() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path().to_path_buf();
+        upsert_agent_to_run(&base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        upsert_agent_to_run(&base, "a", "t", "builder", AgentStatus::Done).unwrap();
+        let mut run = read_run(&base).unwrap();
+        assert_eq!(run.status, RunStatus::Complete);
+        run.id = "auto-old".to_string();
+        write_run(&base, &run).unwrap();
+
+        let handles: Vec<_> = (0..8)
+            .map(|i| {
+                let base = base.clone();
+                std::thread::spawn(move || {
+                    upsert_agent_to_run(
+                        &base,
+                        &format!("agent-{i}"),
+                        "t",
+                        "builder",
+                        AgentStatus::Running,
+                    )
+                    .unwrap();
+                })
+            })
+            .collect();
+        for h in handles {
+            h.join().unwrap();
+        }
+        let run = read_run(&base).unwrap();
+        assert_ne!(run.id, "auto-old");
+        let mut ids = agent_ids(&run);
+        ids.sort_unstable();
+        let expected: Vec<String> = (0..8).map(|i| format!("agent-{i}")).collect();
+        assert_eq!(ids, expected);
+    }
+
+    // Review round 2.
+
+    /// Run `auto-r1` created 4h and updated 3h ago (expired) with a bound
+    /// `pause all` written 3h + 1 min ago.
+    fn expired_pause(base: &Path, now: u64, agents: &[(&str, AgentStatus)]) {
+        live_run(base, now, RunStatus::Running, 4 * 3600, 3 * 3600, agents);
+        put_control(
+            base,
+            ControlAction::Pause,
+            Some("all"),
+            None,
+            now - 3 * 3600 - 60,
+        );
+    }
+
+    /// Cleanup is not run activity: it must not make an expired run live again.
+    #[test]
+    fn cleanup_does_not_revive_expired_pause_stale_running_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        expired_pause(
+            base,
+            now,
+            &[("a", AgentStatus::Done), ("b", AgentStatus::Blocked)],
+        );
+        let before = read_run(base).unwrap();
+        assert_eq!(spawn_block(base, "new", now), None);
+        auto_cleanup_stale_runs(base);
+        let after = read_run(base).unwrap();
+        assert_eq!(after.status, RunStatus::Complete, "stale run is closed");
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(spawn_block(base, "new", epoch_secs_now()), None);
+    }
+
+    #[test]
+    fn cleanup_does_not_revive_expired_pause_stale_agent_branch() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        // No start and no heartbeat: cleanup marks `a` done.
+        expired_pause(base, now, &[("a", AgentStatus::Running)]);
+        let before = read_run(base).unwrap();
+        auto_cleanup_stale_runs(base);
+        let after = read_run(base).unwrap();
+        assert_eq!(after.agents[0].status, AgentStatus::Done, "agent cleaned");
+        assert_eq!(after.updated_at, before.updated_at);
+        assert_eq!(spawn_block(base, "new", epoch_secs_now()), None);
+    }
+
+    #[test]
+    fn epoch_parsing_honors_offsets() {
+        let utc = epoch_secs_from_iso("2026-11-26T10:00:00Z");
+        assert_ne!(utc, 0);
+        assert_eq!(
+            epoch_secs_from_iso("2026-11-26T10:00:00"),
+            utc,
+            "no suffix is UTC"
+        );
+        assert_eq!(epoch_secs_from_iso("2026-11-26T19:00:00+09:00"), utc);
+        assert_eq!(epoch_secs_from_iso("2026-11-26T19:00:00+0900"), utc);
+        assert_eq!(epoch_secs_from_iso("2026-11-26T19:00:00+09"), utc);
+        assert_eq!(epoch_secs_from_iso("2026-11-26T05:00:00-05:00"), utc);
+        assert_eq!(epoch_secs_from_iso("2026-11-26T10:00:00.250Z"), utc);
+        assert_eq!(epoch_secs_from_iso("2026-11-26T19:00:00.5+09:00"), utc);
+        // An unreadable suffix keeps the old UTC reading.
+        assert_eq!(epoch_secs_from_iso("2026-11-26T10:00:00+zz"), utc);
+        assert_eq!(epoch_secs_from_iso("garbage"), 0);
+    }
+
+    /// The reviewer's scenario: the skill text lets the model write local time
+    /// with an offset (`date -Iseconds`); that must not look like the future.
+    #[test]
+    fn offset_timestamp_blocks_cancel_all() {
+        let now = epoch_secs_now();
+        for (offset, shift) in [("+09:00", 9 * 3600i64), ("-05:00", -5 * 3600)] {
+            let tmp = tempfile::tempdir().unwrap();
+            let base = tmp.path();
+            let mut run = live_run(
+                base,
+                now,
+                RunStatus::Aborted,
+                600,
+                0,
+                &[("a", AgentStatus::Running)],
+            );
+            let local = iso_from_secs((now as i64 + shift) as u64);
+            run.updated_at = format!("{}{offset}", &local[..19]);
+            write_run(base, &run).unwrap();
+            put_control(base, ControlAction::Cancel, Some("all"), None, now);
+            assert_eq!(
+                kind_of(base, "new", now),
+                Some(BlockKind::RunCancelled),
+                "cancel all ignored: {}",
+                run.updated_at
+            );
+            // The same abort written 2h + 1s ago has expired.
+            let old = iso_from_secs((now as i64 + shift) as u64 - 7201);
+            run.updated_at = format!("{}{offset}", &old[..19]);
+            write_run(base, &run).unwrap();
+            put_control(base, ControlAction::Cancel, Some("all"), None, now - 7201);
+            assert_eq!(kind_of(base, "new", now), None, "{offset} expired");
+        }
+    }
+
+    #[test]
+    fn future_updated_at_on_aborted_run_blocks_until_mtime_plus_2h() {
+        let now = epoch_secs_now();
+        for (mtime_ago, blocked) in [(7000u64, true), (7300, false)] {
+            let tmp = tempfile::tempdir().unwrap();
+            let base = tmp.path();
+            let mut run = live_run(
+                base,
+                now,
+                RunStatus::Aborted,
+                20000,
+                0,
+                &[("a", AgentStatus::Running)],
+            );
+            run.updated_at = "2099-01-01T00:00:00Z".to_string();
+            write_run(base, &run).unwrap();
+            set_mtime(&run_file(base), now - mtime_ago);
+            put_control(base, ControlAction::Cancel, Some("all"), None, now);
+            let block = spawn_block(base, "new", now);
+            assert_eq!(block.is_some(), blocked, "mtime {mtime_ago}s ago");
+            if let Some(b) = block {
+                assert_eq!(
+                    b.expires_at,
+                    iso_from_secs(now - mtime_ago + RUN_IDLE_SECS),
+                    "expiry anchored at the run.json mtime"
+                );
+            }
+        }
+    }
+
+    /// Denied spawns rewrite run.json, so a bound control.json (written when
+    /// the abort was) is the earlier anchor and caps the abort at 2h.
+    #[test]
+    fn abort_expiry_is_anchored_at_the_earlier_of_control_and_run() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        let mut run = live_run(base, now, RunStatus::Aborted, 20000, 0, &[]);
+        run.updated_at = "2099-01-01T00:00:00Z".to_string();
+        write_run(base, &run).unwrap(); // run.json mtime: now (a denied retry)
+        put_control(base, ControlAction::Cancel, Some("all"), None, now - 7201);
+        assert_eq!(kind_of(base, "new", now), None);
+        put_control(base, ControlAction::Cancel, Some("all"), None, now - 7000);
+        assert_eq!(kind_of(base, "new", now), Some(BlockKind::RunCancelled));
+    }
+
+    /// The skill's `pause` writes control.json and sets run.json `updated_at`
+    /// to now, so an agent that has run for 2.5h does not make it a no-op.
+    #[test]
+    fn pause_after_a_long_running_agent_blocks_once_the_skill_bumps_updated_at() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        let mut run = live_run(
+            base,
+            now,
+            RunStatus::Running,
+            9000,
+            9000,
+            &[("a", AgentStatus::Running)],
+        );
+        run.agents[0].started_at = Some(iso_from_secs(now - 9000));
+        write_run(base, &run).unwrap();
+        // control.json alone: the run has been idle for 2.5h.
+        put_control(base, ControlAction::Pause, Some("all"), None, now);
+        assert_eq!(spawn_block(base, "new", now), None);
+        // The skill also writes updated_at (UTC, with Z).
+        run.updated_at = iso_from_secs(now);
+        write_run(base, &run).unwrap();
+        assert_eq!(kind_of(base, "new", now), Some(BlockKind::Paused));
+        // A spawn now joins the live run instead of rotating it.
+        upsert_agent_to_run(base, "new", "t", "builder", AgentStatus::Blocked).unwrap();
+        assert_eq!(agent_ids(&read_run(base).unwrap()), ["a", "new"]);
+    }
+
+    /// Without a bound control.json nothing caps a future `updated_at`, and
+    /// denied retries rewrite run.json, so it must not fall back to the mtime.
+    #[test]
+    fn aborted_future_updated_at_without_bound_control_is_not_live() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
+        let mut run = live_run(base, now, RunStatus::Aborted, 20000, 0, &[]);
+        run.updated_at = iso_from_secs(now + 9 * 3600)[..19].to_string();
+        write_run(base, &run).unwrap();
+        set_mtime(&run_file(base), now - 7000);
+        assert!(!control_is_bound(base, &run), "no control.json");
+        assert_eq!(spawn_block(base, "new", now), None);
+        // A control.json from before this run is unbound too.
+        put_control(base, ControlAction::Cancel, Some("all"), None, now - 30000);
+        assert!(!control_is_bound(base, &run));
+        assert_eq!(spawn_block(base, "new", now), None);
+        // A denied retry cannot pin it either.
+        upsert_agent_to_run(base, "new", "t", "builder", AgentStatus::Blocked).unwrap();
+        assert_eq!(spawn_block(base, "new", epoch_secs_now()), None);
     }
 }

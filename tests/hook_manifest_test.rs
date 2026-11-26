@@ -121,10 +121,12 @@ fn codex_has_no_tool_failure_event() {
     assert!(manifest(CODEX)["hooks"].get("PostToolUseFailure").is_none());
 }
 
-/// Guard must not be dragged onto the Agent matcher: it is a Bash gate, and
-/// running it per subagent spawn would cost a process for nothing.
+/// Guard stays a Bash gate and also gates Agent spawns: the synchronous
+/// `PreToolUse/Agent` guard is the only thing that can refuse a paused or
+/// cancelled spawn, so it must not be async. The observe handler that records
+/// the spawn stays async.
 #[test]
-fn claude_guard_stays_scoped_to_bash() {
+fn claude_guard_gates_agent_spawns_synchronously() {
     let m = manifest(CLAUDE);
     assert!(
         commands_for(&m, "PreToolUse", "Bash")
@@ -132,11 +134,36 @@ fn claude_guard_stays_scoped_to_bash() {
             .any(|c| invokes(c, "guard")),
         "guard must stay registered for Bash"
     );
-    assert!(
-        !commands_for(&m, "PreToolUse", "Agent")
+    let handlers: Vec<&Value> = m["hooks"]["PreToolUse"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .filter(|entry| entry["matcher"].as_str() == Some("Agent"))
+        .flat_map(|entry| entry["hooks"].as_array().unwrap())
+        .collect();
+    let handler_for = |sub: &str| -> Vec<&Value> {
+        handlers
             .iter()
-            .any(|c| invokes(c, "guard")),
-        "guard must not run on Agent spawns"
+            .copied()
+            .filter(|h| h["command"].as_str().is_some_and(|c| invokes(c, sub)))
+            .collect()
+    };
+    let guards = handler_for("guard");
+    assert_eq!(
+        guards.len(),
+        1,
+        "exactly one PreToolUse/Agent guard handler"
+    );
+    assert!(
+        guards[0].get("async").is_none_or(|a| a == false),
+        "the Agent guard must be synchronous: {:?}",
+        guards[0]
+    );
+    assert_eq!(guards[0]["timeout"], 5);
+    let observers = handler_for("observe");
+    assert!(
+        !observers.is_empty() && observers.iter().all(|h| h["async"] == true),
+        "PreToolUse/Agent must still invoke observe with async: true"
     );
 }
 

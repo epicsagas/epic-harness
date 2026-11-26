@@ -84,6 +84,84 @@ fn claude_bash(command: &str) -> serde_json::Value {
     })
 }
 
+fn claude_agent_spawn() -> serde_json::Value {
+    serde_json::json!({
+        "hook_event_name": "PreToolUse",
+        "session_id": "synthetic-session",
+        "tool_name": "Agent",
+        "tool_input": {
+            "description": "synthetic task",
+            "prompt": "Synthetic task prompt",
+            "subagent_type": "general-purpose",
+        },
+    })
+}
+
+/// `YYYY-MM-DDThh:mm:ssZ` for epoch `secs` (civil-from-days).
+fn iso_utc(secs: u64) -> String {
+    let (z, rem) = ((secs / 86400) as i64 + 719468, secs % 86400);
+    let era = z / 146097;
+    let doe = z - era * 146097;
+    let yoe = (doe - doe / 1460 + doe / 36524 - doe / 146096) / 365;
+    let doy = doe - (365 * yoe + yoe / 4 - yoe / 100);
+    let mp = (5 * doy + 2) / 153;
+    let d = doy - (153 * mp + 2) / 5 + 1;
+    let m = if mp < 10 { mp + 3 } else { mp - 9 };
+    let y = yoe + era * 400 + i64::from(m <= 2);
+    format!(
+        "{y:04}-{m:02}-{d:02}T{:02}:{:02}:{:02}Z",
+        rem / 3600,
+        rem % 3600 / 60,
+        rem % 60
+    )
+}
+
+fn now_secs() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+}
+
+/// Seed run.json with one running agent, `created_ago` / `updated_ago`
+/// seconds old.
+fn seed_run(orch: &std::path::Path, status: &str, created_ago: u64, updated_ago: u64) {
+    fs::create_dir_all(orch).unwrap();
+    let now = now_secs();
+    let run = serde_json::json!({
+        "id": "auto-synthetic",
+        "status": status,
+        "agents": [{
+            "id": "agent-synthetic",
+            "role": "builder",
+            "task": "synthetic task",
+            "status": "running",
+        }],
+        "created_at": iso_utc(now - created_ago),
+        "updated_at": iso_utc(now - updated_ago),
+    });
+    fs::write(orch.join("run.json"), run.to_string()).unwrap();
+}
+
+/// Seed control.json (generation 1, written now, after run.json).
+fn seed_control(orch: &std::path::Path, action: &str) {
+    let directive = serde_json::json!({
+        "action": action,
+        "target": "all",
+        "message": null,
+        "generation": 1,
+    });
+    fs::write(orch.join("control.json"), directive.to_string()).unwrap();
+}
+
+fn deny_reason(out: &Out) -> String {
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    only_json(&out.stdout)["hookSpecificOutput"]["permissionDecisionReason"]
+        .as_str()
+        .unwrap()
+        .to_string()
+}
+
 /// Exactly one JSON object on stdout, nothing else (no stdin echo).
 fn only_json(stdout: &str) -> serde_json::Value {
     let mut it = serde_json::Deserializer::from_str(stdout).into_iter::<serde_json::Value>();
@@ -136,10 +214,61 @@ fn claude_edit_orchestration_block_is_a_deny() {
     ]
     .concat();
     let out = guard(payload, &envs, |orch| {
-        fs::create_dir_all(orch).unwrap();
+        seed_run(orch, "running", 100, 10);
         fs::write(orch.join("control.json"), r#"{"pause":"agent-x"}"#).unwrap();
     });
     assert_deny(&out, "BLOCKED: control.json pause directive active");
+}
+
+#[test]
+fn claude_agent_spawn_paused_is_a_deny() {
+    let out = guard(claude_agent_spawn(), CLAUDE_ENV, |orch| {
+        seed_run(orch, "running", 100, 10);
+        seed_control(orch, "pause");
+    });
+    assert_deny(&out, "not started: paused by user directive");
+    assert!(deny_reason(&out).contains("/intervene resume all"));
+}
+
+#[test]
+fn claude_agent_spawn_cancelled_run_is_a_deny() {
+    let out = guard(claude_agent_spawn(), CLAUDE_ENV, |orch| {
+        seed_run(orch, "aborted", 500, 100);
+    });
+    assert_deny(&out, "was cancelled by the user");
+    assert!(deny_reason(&out).contains("/intervene resume all"));
+}
+
+fn assert_spawn_allowed(out: &Out) {
+    assert_eq!(out.code, 0, "stderr: {}", out.stderr);
+    assert!(
+        !out.stdout.contains("permissionDecision"),
+        "stdout: {}",
+        out.stdout
+    );
+}
+
+#[test]
+fn claude_agent_spawn_allowed_prints_no_decision() {
+    assert_spawn_allowed(&guard(claude_agent_spawn(), CLAUDE_ENV, no_setup));
+}
+
+#[test]
+fn claude_agent_spawn_stale_cancel_allowed() {
+    let out = guard(claude_agent_spawn(), CLAUDE_ENV, |orch| {
+        seed_run(orch, "aborted", 4 * 3600, 3 * 3600);
+        seed_control(orch, "cancel");
+    });
+    assert_spawn_allowed(&out);
+}
+
+#[test]
+fn claude_agent_spawn_resume_all_allowed() {
+    let out = guard(claude_agent_spawn(), CLAUDE_ENV, |orch| {
+        seed_run(orch, "aborted", 500, 100);
+        seed_control(orch, "resume");
+    });
+    assert_spawn_allowed(&out);
 }
 
 /// Warn-only and allowed commands are untouched: exit 0, never a deny.
