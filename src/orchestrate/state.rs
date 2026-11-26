@@ -1551,6 +1551,8 @@ mod tests {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
         upsert_agent_to_run(base, "a", "t", "builder", AgentStatus::Running).unwrap();
+        // A second running agent keeps the run incomplete, so it stays live.
+        upsert_agent_to_run(base, "hold", "t", "builder", AgentStatus::Running).unwrap();
         let mut run = read_run(base).unwrap();
         run.agents[0].status = AgentStatus::Cancelled;
         write_run(base, &run).unwrap();
