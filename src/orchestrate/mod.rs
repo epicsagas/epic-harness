@@ -263,8 +263,13 @@ pub(crate) fn is_agent_event(input: &HookInput) -> bool {
 }
 
 pub(crate) fn extract_agent_id(input: &HookInput) -> Option<String> {
-    // Codex supplies a stable id; prefer it over the prompt hash.
-    if let Some(id) = input.agent_id.as_deref()
+    // Lifecycle events carry the subagent's own id; prefer it over the prompt
+    // hash. On tool events the payload `agent_id` names the CALLER (a nested
+    // spawn inside a subagent carries that subagent's id), so it is ignored.
+    if matches!(
+        input.hook_event_name.as_deref(),
+        Some("SubagentStart") | Some("SubagentStop")
+    ) && let Some(id) = input.agent_id.as_deref()
         && !id.trim().is_empty()
     {
         return Some(id.trim().to_string());
@@ -466,7 +471,7 @@ mod tests {
         orch_state::write_run(&base, &run).unwrap();
 
         let input = HookInput {
-            tool_name: Some("Agent".to_string()),
+            hook_event_name: Some("SubagentStop".to_string()),
             agent_id: Some(id.to_string()),
             tool_response: Some(serde_json::json!("## Status: DONE")),
             ..Default::default()
@@ -530,6 +535,73 @@ mod tests {
         let id = id.unwrap();
         assert!(id.starts_with("agent-"));
         assert_eq!(id.len(), 14); // "agent-" + 8 hex chars
+    }
+
+    /// On Claude a tool event's `agent_id` names the CALLER, so a nested
+    /// spawn is identified by its prompt hash, never by the parent's id.
+    #[test]
+    fn nested_claude_tool_events_ignore_payload_agent_id() {
+        let hash_id = extract_agent_id(&HookInput {
+            tool_name: Some("Agent".to_string()),
+            tool_input: Some(serde_json::json!({"prompt": "X"})),
+            ..Default::default()
+        })
+        .unwrap();
+        assert!(hash_id.starts_with("agent-"));
+        for ev in ["PreToolUse", "PostToolUse"] {
+            let input = HookInput {
+                hook_event_name: Some(ev.to_string()),
+                tool_name: Some("Agent".to_string()),
+                agent_id: Some("a-parent".to_string()),
+                tool_input: Some(serde_json::json!({"prompt": "X"})),
+                ..Default::default()
+            };
+            assert_eq!(extract_agent_id(&input), Some(hash_id.clone()), "{ev}");
+        }
+    }
+
+    /// Claude lifecycle events carry the subagent's own id.
+    #[test]
+    fn claude_subagent_start_uses_payload_agent_id() {
+        let input = HookInput {
+            hook_event_name: Some("SubagentStart".to_string()),
+            agent_id: Some("a-child".to_string()),
+            ..Default::default()
+        };
+        assert_eq!(extract_agent_id(&input).as_deref(), Some("a-child"));
+    }
+
+    /// Cancelling the parent must not block its nested spawn of another
+    /// prompt, while cancelling the nested prompt-hash id does.
+    #[test]
+    #[serial_test::serial]
+    fn nested_spawn_is_blocked_by_its_own_id_not_the_parents() {
+        let input = HookInput {
+            hook_event_name: Some("PreToolUse".to_string()),
+            tool_name: Some("Agent".to_string()),
+            agent_id: Some("a-parent".to_string()),
+            tool_input: Some(serde_json::json!({"prompt": "X"})),
+            ..Default::default()
+        };
+        let nested = extract_agent_id(&input).unwrap();
+        // SAFETY: serial test, the var is removed below
+        unsafe {
+            std::env::set_var("EPIC_ORCHESTRATION", "enabled");
+        }
+        for (cancelled, expected) in [("a-parent", 0), (nested.as_str(), 2)] {
+            let tmp = tempfile::tempdir().unwrap();
+            let base = tmp.path();
+            gate_fixture(
+                base,
+                orch_state::RunStatus::Running,
+                &[(cancelled, AgentStatus::Cancelled)],
+                None,
+            );
+            assert_eq!(run_pre_in(base, &input).unwrap(), expected, "{cancelled}");
+        }
+        unsafe {
+            std::env::remove_var("EPIC_ORCHESTRATION");
+        }
     }
 
     #[test]
@@ -805,9 +877,17 @@ mod tests {
         let input = HookInput {
             hook_event_name: Some("PreToolUse".to_string()),
             tool_name: Some("Agent".to_string()),
-            agent_id: Some("x".to_string()),
-            tool_input: Some(serde_json::json!({"description": "synthetic task"})),
+            tool_input: Some(serde_json::json!({"prompt": "synthetic task"})),
             ..Default::default()
+        };
+        // A tool event is identified by its prompt hash; rows name it "x".
+        let xid = extract_agent_id(&input).unwrap();
+        let sub = |id: &str| {
+            if id == "x" {
+                xid.clone()
+            } else {
+                id.to_string()
+            }
         };
         for orchestration in [false, true] {
             // SAFETY: serial test, the var is restored below
@@ -821,7 +901,18 @@ mod tests {
             for row in &rows {
                 let tmp = tempfile::tempdir().unwrap();
                 let base = tmp.path();
-                gate_fixture(base, row.status.clone(), &row.agents, row.control.clone());
+                let agents: Vec<(String, AgentStatus)> = row
+                    .agents
+                    .iter()
+                    .map(|(id, st)| (sub(id), st.clone()))
+                    .collect();
+                let agents: Vec<(&str, AgentStatus)> = agents
+                    .iter()
+                    .map(|(id, st)| (id.as_str(), st.clone()))
+                    .collect();
+                let control = row.control.clone().map(|(a, t)| (a, t.map(sub)));
+                let control = control.as_ref().map(|(a, t)| (a.clone(), t.as_deref()));
+                gate_fixture(base, row.status.clone(), &agents, control);
                 let code = run_pre_in(base, &input).unwrap();
                 let case = format!("{} (EPIC_ORCHESTRATION {orchestration})", row.name);
                 assert_eq!(
@@ -830,7 +921,7 @@ mod tests {
                     "{case}"
                 );
                 let run = orch_state::read_run(base).unwrap();
-                let x = run.agents.iter().find(|a| a.id == "x").unwrap();
+                let x = run.agents.iter().find(|a| a.id == xid).unwrap();
                 assert_eq!(x.status, row.recorded, "{case}");
                 if row.status == Aborted && row.blocked {
                     assert_eq!(run.status, Aborted, "{case}: abort stays");
