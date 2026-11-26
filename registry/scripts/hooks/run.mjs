@@ -1,11 +1,13 @@
 #!/usr/bin/env node
-// Generic cross-platform hook launcher for the epic Claude, Codex, and Grok
-// plugins.
+// Generic cross-platform hook launcher for the epic Claude, Codex, Grok, and
+// Antigravity (agy) plugins.
 //
-// Every hook in .claude-plugin/hooks.json, .codex-plugin/hooks.json, and
-// .grok-plugin/hooks.json routes through this script so the command strings
-// stay shell-free: `node ${<host root>}/registry/scripts/hooks/run.mjs <sub>`
-// (PLUGIN_ROOT / CLAUDE_PLUGIN_ROOT / GROK_PLUGIN_ROOT per host). The host
+// Every hook in .claude-plugin/hooks.json, .codex-plugin/hooks.json,
+// .grok-plugin/hooks.json, and the root hooks.json (agy) routes through this
+// script so the command strings stay shell-free:
+// `node ${<host root>}/registry/scripts/hooks/run.mjs <sub>`
+// (PLUGIN_ROOT / CLAUDE_PLUGIN_ROOT / GROK_PLUGIN_ROOT per host; agy uses a
+// relative path and no variable). The host
 // pipes hook JSON on stdin and expects the hook's stdout + exit code back, so
 // we spawn `epic` with inherited stdio and propagate its exit code. When
 // `epic` is not installed we degrade to a notice on stdout and exit 0 — a
@@ -14,6 +16,15 @@
 // `session-start` is the SessionStart special case: run the install.cjs
 // bootstrap best-effort first, then `epic resume` — on every OS, without
 // shell sequencing (`;` vs `&`).
+//
+// `agy-guard`, `agy-observe` and `agy-reflect` run `epic guard|observe|reflect`
+// in agy mode, which holds two invariants on every path. A: stdout is empty,
+// except that guard forwards one `{"decision":"deny","reason":...}` line when
+// the child printed exactly such an object. B: the exit code is always 0.
+// Why: agy reads any PreToolUse stdout object, even `{}`, as a deny, and any
+// non-zero exit as a block of the tool call. Without this filter an older or
+// crashing `epic` (which echoes stdin or prints `{}`) would block every shell
+// command. Guard therefore fails open: a missing or broken `epic` allows.
 //
 // Node.js built-ins only, matching registry/scripts/install.cjs. The .mjs
 // extension pins ESM semantics regardless of any package.json "type"; the
@@ -60,8 +71,27 @@ const args = process.argv.slice(2);
 // EACCES, a signal) ends in a silent exit 0 with nothing on stdout or stderr:
 // the hook must never surface an error on the user's prompt.
 const quiet = args[0] === "prompt";
+// An explicit map, not an `agy-` prefix strip: a future `agy-session-start`
+// must not silently drop resume's injectSteps.
+const agySub = new Map([
+  ["agy-guard", "guard"],
+  ["agy-observe", "observe"],
+  ["agy-reflect", "reflect"],
+]).get(args[0]);
+// agy reads stdout as a hook decision, so its notices go to stderr.
 const epicNotFound = () => {
-  if (!quiet) console.log("[harness] epic not found");
+  if (agySub) console.error("[harness] epic not found");
+  else if (!quiet) console.log("[harness] epic not found");
+};
+// The deny line agy may receive: only a JSON object with decision "deny".
+const agyDenyLine = (text) => {
+  try {
+    const obj = JSON.parse(text.trim());
+    if (obj === null || typeof obj !== "object" || Array.isArray(obj) || obj.decision !== "deny") return "";
+    return JSON.stringify({ decision: "deny", reason: typeof obj.reason === "string" ? obj.reason : "" }) + "\n";
+  } catch {
+    return "";
+  }
 };
 if (args.length === 0) {
   // exitCode (not process.exit): stdout to a pipe is an async write, and a
@@ -87,6 +117,7 @@ if (args.length === 0) {
     });
     args[0] = "resume";
   }
+  if (agySub) args[0] = agySub;
 
   // Append (never prepend) the bootstrap install dir: a binary installed
   // there runs in this same session without shadowing other tools on PATH.
@@ -129,8 +160,12 @@ if (args.length === 0) {
     // `prompt`: stdout carries the hook JSON, stderr (an older epic's
     // unknown-subcommand error) must never reach the host.
     if (quiet) options.stdio = ["inherit", "inherit", "ignore"];
+    // agy: stdout is piped so the close handler can decide what (if anything) agy sees.
+    if (agySub) options.stdio = ["inherit", "pipe", "inherit"];
     const child = spawn(localEpic || "epic", args, options);
 
+    const chunks = [];
+    if (agySub) child.stdout?.on("data", (c) => chunks.push(c));
     let spawnFailed = false;
 
     child.on("error", (err) => {
@@ -140,7 +175,12 @@ if (args.length === 0) {
       // setting exitCode (instead of process.exit) lets the pending stdout
       // write flush — a piped notice must not be truncated mid-write.
       spawnFailed = true;
-      if (err.code === "ENOENT") {
+      if (agySub) {
+        // Fail open: nothing on stdout, exit 0 (a non-zero exit blocks the tool call).
+        if (err.code === "ENOENT") epicNotFound();
+        else console.error(`[harness] ${err.message}`);
+        process.exitCode = 0;
+      } else if (err.code === "ENOENT") {
         // Missing harness: degrade on stdout, exit 0.
         epicNotFound();
         process.exitCode = 0;
@@ -157,6 +197,16 @@ if (args.length === 0) {
 
     child.on("close", (code, signal) => {
       if (spawnFailed) return;
+      if (agySub) {
+        // exitCode (not process.exit): the deny line is a piped write.
+        process.exitCode = 0;
+        if (process.platform === "win32" && code === 9009) epicNotFound();
+        else if (agySub === "guard") {
+          const line = agyDenyLine(Buffer.concat(chunks).toString("utf8"));
+          if (line) process.stdout.write(line);
+        }
+        return;
+      }
       if (quiet) {
         // Silent fail-open; a current epic already exits 0 for `prompt`.
         process.exit(0);

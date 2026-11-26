@@ -79,6 +79,15 @@ impl HookInput {
             .filter(|e| !e.is_empty())
     }
 
+    /// True when the payload carries no tool output and a string `error` is the
+    /// only outcome signal (agy PostToolUse: "" means success).
+    pub fn error_is_only_outcome(&self) -> bool {
+        self.tool_output.is_none()
+            && self.tool_response.is_none()
+            && self.tool_result.is_none()
+            && matches!(self.error, Some(serde_json::Value::String(_)))
+    }
+
     /// True for a user-aborted call (`is_interrupt` is boolean true).
     pub fn interrupted(&self) -> bool {
         self.is_interrupt.as_ref().and_then(|v| v.as_bool()) == Some(true)
@@ -120,7 +129,12 @@ pub struct AgyPayload {
 /// a snake_case `hook_event_name` (grok sends both event keys).
 ///
 /// `lastUserInput`, `transcriptPath` and `artifactDirectoryPath` are never
-/// copied: user prompt text can hold personal data.
+/// copied: user prompt text can hold personal data. Neither are `toolCall.id`
+/// or `stepIdx`. A `toolCall` object maps to `tool_name` and `tool_input`
+/// (never overwriting a root key). Its args stay as sent, plus two aliases:
+/// `CommandLine` always sets `command` (guard must check the string agy
+/// executes) and `Path` fills an absent `file_path`. Observe records only
+/// `command` or `file_path`, so other args (edit content) are never persisted.
 pub fn adapt_agy_payload(v: &mut serde_json::Value) -> Option<AgyPayload> {
     let obj = v.as_object_mut()?;
     let id = obj.get("conversationId")?.as_str()?.to_string();
@@ -131,6 +145,34 @@ pub fn adapt_agy_payload(v: &mut serde_json::Value) -> Option<AgyPayload> {
     obj.entry("session_id")
         .or_insert_with(|| serde_json::Value::String(id));
     obj.insert("hook_event_name".into(), serde_json::Value::String(event));
+
+    let call = obj.get("toolCall").and_then(|c| c.as_object());
+    let name = call
+        .and_then(|c| c.get("name"))
+        .and_then(|n| n.as_str())
+        .map(String::from);
+    let args = call
+        .and_then(|c| c.get("args"))
+        .and_then(|a| a.as_object())
+        .cloned();
+    if let Some(name) = name
+        && !obj.contains_key("tool_name")
+    {
+        obj.insert("tool_name".into(), serde_json::Value::String(name));
+    }
+    if let Some(mut args) = args
+        && !obj.contains_key("tool_input")
+    {
+        if let Some(cmd) = args.get("CommandLine").filter(|c| c.is_string()).cloned() {
+            args.insert("command".into(), cmd);
+        }
+        if !args.contains_key("file_path")
+            && let Some(path) = args.get("Path").filter(|p| p.is_string()).cloned()
+        {
+            args.insert("file_path".into(), path);
+        }
+        obj.insert("tool_input".into(), serde_json::Value::Object(args));
+    }
 
     let usable = |c: &serde_json::Value| {
         c.as_str()
@@ -368,5 +410,86 @@ mod tests {
             Some(b.path().to_path_buf())
         );
         assert_eq!(ws(json!({"workspacePaths": ["rel"]})), None);
+    }
+
+    fn agy_tool_value(name: &str, args: serde_json::Value) -> serde_json::Value {
+        agy_value(json!({
+            "hookEventName": "PreToolUse",
+            "toolCall": {"id": "call-1", "name": name, "args": args},
+        }))
+    }
+
+    #[test]
+    fn agy_tool_call_maps_name_and_input() {
+        let mut v = agy_tool_value("run_command", json!({"CommandLine": "false"}));
+        assert!(adapt_agy_payload(&mut v).is_some());
+        let input: HookInput = serde_json::from_value(v).unwrap();
+        assert_eq!(input.tool_name.as_deref(), Some("run_command"));
+        let args = input.tool_input.unwrap();
+        assert_eq!(args["command"], "false");
+        assert_eq!(args["CommandLine"], "false");
+    }
+
+    #[test]
+    fn agy_path_maps_to_file_path() {
+        let mut v = agy_tool_value("read_file", json!({"Path": "/p/a.txt"}));
+        assert!(adapt_agy_payload(&mut v).is_some());
+        assert_eq!(v["tool_input"]["file_path"], "/p/a.txt");
+    }
+
+    #[test]
+    fn agy_commandline_wins_over_command() {
+        let mut v = agy_tool_value(
+            "run_command",
+            json!({"CommandLine": "rm -rf /", "command": "true"}),
+        );
+        assert!(adapt_agy_payload(&mut v).is_some());
+        assert_eq!(v["tool_input"]["command"], "rm -rf /");
+    }
+
+    #[test]
+    fn agy_tool_mapping_never_overwrites_root_keys() {
+        let mut v = agy_tool_value("run_command", json!({"CommandLine": "false"}));
+        v["tool_name"] = json!("Bash");
+        v["tool_input"] = json!({"command": "ls"});
+        assert!(adapt_agy_payload(&mut v).is_some());
+        assert_eq!(v["tool_name"], "Bash");
+        assert_eq!(v["tool_input"], json!({"command": "ls"}));
+    }
+
+    #[test]
+    fn agy_tool_mapping_ignores_bad_shapes() {
+        for call in [
+            json!("run_command"),
+            json!({"name": "run_command", "args": ["CommandLine"]}),
+            json!({"name": "run_command", "args": {"CommandLine": 7}}),
+        ] {
+            let mut v = agy_value(json!({"hookEventName": "PreToolUse", "toolCall": call}));
+            assert!(adapt_agy_payload(&mut v).is_some());
+            assert!(v["tool_input"].get("command").is_none(), "{v}");
+            let input: HookInput = serde_json::from_value(v).unwrap();
+            assert_eq!(input.hook_event_name.as_deref(), Some("PreToolUse"));
+        }
+    }
+
+    #[test]
+    fn agy_stop_has_no_tool() {
+        let mut v = agy_value(json!({"hookEventName": "Stop", "error": ""}));
+        assert!(adapt_agy_payload(&mut v).is_some());
+        assert!(v.get("tool_name").is_none() && v.get("tool_input").is_none());
+    }
+
+    #[test]
+    fn error_is_only_outcome_table() {
+        let only = |v: serde_json::Value| {
+            serde_json::from_value::<HookInput>(v)
+                .unwrap()
+                .error_is_only_outcome()
+        };
+        assert!(only(json!({"error": ""})));
+        assert!(only(json!({"error": "x"})));
+        assert!(!only(json!({"error": "x", "tool_response": "r"})));
+        assert!(!only(json!({})));
+        assert!(!only(json!({"error": {"code": 1}})));
     }
 }

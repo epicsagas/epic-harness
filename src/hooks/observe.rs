@@ -531,7 +531,13 @@ pub fn run(input: &HookInput) -> i32 {
         })
     };
 
-    if input.is_failure_event() {
+    // agy PostToolUse has no output and no exit code: a non-blank root `error`
+    // is a failure, an empty one a success. A shell call that exits non-zero
+    // is invisible here (it reports `error: ""`).
+    let failed = input.is_failure_event()
+        || (input.error_is_only_outcome() && input.failure_text().is_some());
+
+    if failed {
         // PostToolUseFailure: `error` is the host's own diagnostic, so the
         // quoted-material rules of the success path do not apply.
         let text = input.failure_text().unwrap_or("");
@@ -548,6 +554,17 @@ pub fn run(input: &HookInput) -> i32 {
         if !text.is_empty() {
             record.error_snippet = Some(mask_snippet(text, 500));
         }
+    } else if input.error_is_only_outcome() {
+        // No output to score, so the empty-output rules of `score_bash` must
+        // not apply.
+        let dims = ScoreDimensions {
+            tool_success: 1.0,
+            output_quality: 1.0,
+            execution_cost: 1.0,
+        };
+        record.result = Some("success".into());
+        record.dimensions = Some(dims);
+        record.score = Some(compute_score(&dims));
     } else if let Some((output, stderr, streams_separated)) = resolved_output {
         let combined = format!("{output}\n{stderr}");
 
@@ -704,7 +721,7 @@ pub fn run(input: &HookInput) -> i32 {
 
     // GateGuard: emit concrete investigation hints for Edit/Write to force
     // fact-based verification instead of generic "are you sure?" prompts.
-    if !input.is_failure_event() {
+    if !failed {
         generate_investigation_hints(input.tool_name.as_deref().unwrap_or(""), action.as_deref());
     }
 
