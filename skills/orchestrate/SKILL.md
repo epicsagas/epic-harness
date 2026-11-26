@@ -182,9 +182,10 @@ For `resume`, set action to "resume" and target to the agent_id or "all".
 **Additional actions by type:**
 
 - **cancel all**: Also update `$HARNESS_DIR/orchestrator/run.json` status to "aborted" and set its `updated_at` to the current UTC time as `YYYY-MM-DDThh:mm:ssZ` (with the `Z`)
+- **pause** (all or an agent): Also set `$HARNESS_DIR/orchestrator/run.json` `updated_at` to the current UTC time as `YYYY-MM-DDThh:mm:ssZ` (with the `Z`), so the pause holds for 2 hours from now even when the run has been idle
 - **resume**: Write the directive only; never edit run.json
 - **redirect**: Also append the new instruction to the target agent's `$HARNESS_DIR/orchestrator/inbox/{agent_id}.jsonl` as a new line: `{"type": "redirect", "instruction": "{new_instruction}", "at": "{ISO-8601}"}`
-- **cancel {agent_id}**: Also update the agent's status in run.json to "cancelled"
+- **cancel {agent_id}**: Also update the agent's status in run.json to "cancelled" and set `updated_at` to the current UTC time as `YYYY-MM-DDThh:mm:ssZ` (with the `Z`)
 
 ### Step 4: Confirm
 
@@ -201,6 +202,7 @@ For pause and cancel, also output: "New spawns stay blocked until /intervene res
 - Multiple interventions can be queued (generation number increases each time)
 - On Claude Code, the guard hook checks run.json and control.json before every Agent spawn and refuses paused or cancelled spawns. Blocks end after 2 hours without run activity.
 - Resume lifts a block the user set: run it only when the user asks for it.
+- On Codex a spawn cannot be blocked, so `cancel all` only lasts until the next subagent start there.
 - "cancel all" is destructive — confirm with the user before executing
 - "redirect" requires a new instruction — if none is provided, ask the user
 

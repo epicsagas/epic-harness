@@ -468,66 +468,42 @@ fn mtime_secs(path: &Path) -> Option<u64> {
 /// without offset, a wrong clock) is replaced by the run.json mtime, which
 /// comes from the harness host clock. An aborted run with a bound control.json
 /// is anchored at the earlier of that and control.json's mtime: denied spawns
-/// rewrite run.json, and they must not extend a cancel.
+/// rewrite run.json, and they must not extend a cancel. Without a bound
+/// control.json there is no such cap, so a future `updated_at` on an aborted
+/// run is unknown (0, not live) instead of falling back to that mtime.
 fn run_activity_secs(base: &Path, run: &OrchestrationRun, now: u64) -> u64 {
     let t = epoch_secs_from_iso(&run.updated_at);
     if t == 0 {
         return 0;
     }
+    let bound_control = if run.status == RunStatus::Aborted && control_is_bound(base, run) {
+        mtime_secs(&control_file(base))
+    } else {
+        None
+    };
     let t = if t > now + CLOCK_SKEW_SECS {
+        if run.status == RunStatus::Aborted && bound_control.is_none() {
+            return 0;
+        }
         mtime_secs(&run_file(base)).unwrap_or(0)
     } else {
         t
     };
-    if run.status == RunStatus::Aborted
-        && control_is_bound(base, run)
-        && let Some(c) = mtime_secs(&control_file(base))
-    {
-        return t.min(c);
-    }
-    t
-}
-
-/// Newest sign of life among the run's Running agents: the later of
-/// `started_at` and the agent status file heartbeat (the rule
-/// `auto_cleanup_stale_runs` uses).
-fn agent_last_alive(base: &Path, run: &OrchestrationRun) -> Option<u64> {
-    run.agents
-        .iter()
-        .filter(|a| a.status == AgentStatus::Running)
-        .filter_map(|a| {
-            let started = a.started_at.as_deref().map(epoch_secs_from_iso);
-            let heartbeat =
-                read_agent_status(base, &a.id).map(|s| epoch_secs_from_iso(&s.last_heartbeat));
-            started.into_iter().chain(heartbeat).max()
-        })
-        .filter(|t| *t != 0)
-        .max()
+    bound_control.map_or(t, |c| t.min(c))
 }
 
 /// Earliest time the run's blocks end by themselves.
 pub(crate) fn run_expiry(base: &Path, run: &OrchestrationRun, now: u64) -> String {
-    let mut last = run_activity_secs(base, run, now);
-    if run.status != RunStatus::Aborted {
-        last = last.max(agent_last_alive(base, run).unwrap_or(0));
-    }
-    crate::shared::helpers::iso_from_secs(last + RUN_IDLE_SECS)
+    crate::shared::helpers::iso_from_secs(run_activity_secs(base, run, now) + RUN_IDLE_SECS)
 }
 
-/// A run is live while its last activity is at most `RUN_IDLE_SECS` old, or
-/// (unless aborted) while a Running agent has shown life within that time.
-/// Derived, never persisted: a malformed `updated_at` is not live. An agent
-/// stuck Running is bounded by its last start or heartbeat, so it cannot
-/// extend a block past `RUN_IDLE_SECS` without writing a new heartbeat. An
-/// aborted run never counts agents, so a cancel always expires on schedule.
+/// A run is live while its last activity is at most `RUN_IDLE_SECS` old.
+/// Derived, never persisted: a malformed `updated_at` is not live. Agents do
+/// not count as activity: every spawn, completion and intervention writes
+/// `updated_at`, so a block set by an intervention lasts 2h from then.
 pub fn is_live(base: &Path, run: &OrchestrationRun, now: u64) -> bool {
     let t = run_activity_secs(base, run, now);
-    if t == 0 {
-        return false;
-    }
-    let within = |t: u64| t <= now + CLOCK_SKEW_SECS && now.saturating_sub(t) <= RUN_IDLE_SECS;
-    within(t)
-        || (run.status != RunStatus::Aborted && agent_last_alive(base, run).is_some_and(within))
+    t != 0 && t <= now + CLOCK_SKEW_SECS && now.saturating_sub(t) <= RUN_IDLE_SECS
 }
 
 /// control.json counts for a run only when it was written during that run:
@@ -836,7 +812,7 @@ pub fn auto_cleanup_stale_runs(base: &Path) {
     let run_epoch = epoch_secs_from_iso(&run.updated_at);
     let stale_complete =
         run.status == RunStatus::Complete && current_epoch.saturating_sub(run_epoch) > 3600;
-    // Same liveness as the gate: a run with a living agent is not stale.
+    // Same liveness as the gate and rotation.
     let stale_running = run.status == RunStatus::Running && !is_live(base, &run, current_epoch);
 
     // Also mark as complete if all agents are now done
@@ -2101,8 +2077,10 @@ mod tests {
         assert!(!is_live(base, &run, now));
         assert_eq!(spawn_block(base, "x", now), None);
 
-        // Future beyond the skew allowance: the run.json mtime stands in, so an
-        // old mtime means expired (a future time cannot pin a block forever).
+        // Future beyond the skew allowance: an aborted run without a bound
+        // control.json is not live, and for other runs the run.json mtime
+        // stands in, so an old mtime means expired (a future time cannot pin a
+        // block forever).
         let just_too_far = iso_from_secs(now + 301);
         for future in ["2099-01-01T00:00:00Z", just_too_far.as_str()] {
             run.updated_at = future.to_string();
@@ -2768,9 +2746,13 @@ mod tests {
         assert_eq!(kind_of(base, "new", now), Some(BlockKind::RunCancelled));
     }
 
-    /// One long-running agent (fresh heartbeat) keeps the run live although
-    /// nothing else touched run.json for 2.5h.
-    fn long_running_agent(base: &Path, now: u64, heartbeat_ago: Option<u64>) {
+    /// The skill's `pause` writes control.json and sets run.json `updated_at`
+    /// to now, so an agent that has run for 2.5h does not make it a no-op.
+    #[test]
+    fn pause_after_a_long_running_agent_blocks_once_the_skill_bumps_updated_at() {
+        let tmp = tempfile::tempdir().unwrap();
+        let base = tmp.path();
+        let now = epoch_secs_now();
         let mut run = live_run(
             base,
             now,
@@ -2781,78 +2763,37 @@ mod tests {
         );
         run.agents[0].started_at = Some(iso_from_secs(now - 9000));
         write_run(base, &run).unwrap();
-        if let Some(ago) = heartbeat_ago {
-            heartbeat(base, "a", ago);
-        }
+        // control.json alone: the run has been idle for 2.5h.
         put_control(base, ControlAction::Pause, Some("all"), None, now);
-    }
-
-    #[test]
-    fn pause_on_long_running_agent_blocks() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path();
-        let now = epoch_secs_now();
-        long_running_agent(base, now, Some(60));
-        assert_eq!(kind_of(base, "new", now), Some(BlockKind::Paused));
-        let run = read_run(base).unwrap();
-        assert!(is_live(base, &run, now));
-    }
-
-    #[test]
-    fn stuck_running_agent_does_not_pin_a_block_forever() {
-        let now = epoch_secs_now();
-        // No heartbeat: its start is 2.5h old.
-        let tmp = tempfile::tempdir().unwrap();
-        long_running_agent(tmp.path(), now, None);
-        assert_eq!(kind_of(tmp.path(), "new", now), None);
-        // A stale heartbeat does not count either.
-        let tmp = tempfile::tempdir().unwrap();
-        long_running_agent(tmp.path(), now, Some(7201));
-        assert_eq!(kind_of(tmp.path(), "new", now), None);
-    }
-
-    #[test]
-    fn rotation_does_not_drop_a_living_agent() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path();
-        let now = epoch_secs_now();
-        long_running_agent(base, now, Some(60));
-        // Gate and rotation agree: the run is live, so a spawn joins it.
-        upsert_agent_to_run(base, "new", "t", "builder", AgentStatus::Running).unwrap();
-        let run = read_run(base).unwrap();
-        assert_eq!(run.id, "auto-r1");
-        assert_eq!(agent_ids(&run), ["a", "new"]);
-    }
-
-    /// A cancel expires exactly on schedule: agents never extend an aborted run.
-    #[test]
-    fn aborted_run_expires_despite_a_living_agent() {
-        let tmp = tempfile::tempdir().unwrap();
-        let base = tmp.path();
-        let now = epoch_secs_now();
-        let mut run = live_run(
-            base,
-            now,
-            RunStatus::Aborted,
-            9000,
-            7201,
-            &[("a", AgentStatus::Running)],
-        );
-        run.agents[0].started_at = Some(iso_from_secs(now - 60));
-        write_run(base, &run).unwrap();
-        heartbeat(base, "a", 30);
         assert_eq!(spawn_block(base, "new", now), None);
+        // The skill also writes updated_at (UTC, with Z).
+        run.updated_at = iso_from_secs(now);
+        write_run(base, &run).unwrap();
+        assert_eq!(kind_of(base, "new", now), Some(BlockKind::Paused));
+        // A spawn now joins the live run instead of rotating it.
+        upsert_agent_to_run(base, "new", "t", "builder", AgentStatus::Blocked).unwrap();
+        assert_eq!(agent_ids(&read_run(base).unwrap()), ["a", "new"]);
     }
 
+    /// Without a bound control.json nothing caps a future `updated_at`, and
+    /// denied retries rewrite run.json, so it must not fall back to the mtime.
     #[test]
-    fn cleanup_keeps_a_run_with_a_living_agent() {
+    fn aborted_future_updated_at_without_bound_control_is_not_live() {
         let tmp = tempfile::tempdir().unwrap();
         let base = tmp.path();
         let now = epoch_secs_now();
-        long_running_agent(base, now, Some(60));
-        auto_cleanup_stale_runs(base);
-        let run = read_run(base).unwrap();
-        assert_eq!(run.status, RunStatus::Running);
-        assert_eq!(run.agents[0].status, AgentStatus::Running);
+        let mut run = live_run(base, now, RunStatus::Aborted, 20000, 0, &[]);
+        run.updated_at = iso_from_secs(now + 9 * 3600)[..19].to_string();
+        write_run(base, &run).unwrap();
+        set_mtime(&run_file(base), now - 7000);
+        assert!(!control_is_bound(base, &run), "no control.json");
+        assert_eq!(spawn_block(base, "new", now), None);
+        // A control.json from before this run is unbound too.
+        put_control(base, ControlAction::Cancel, Some("all"), None, now - 30000);
+        assert!(!control_is_bound(base, &run));
+        assert_eq!(spawn_block(base, "new", now), None);
+        // A denied retry cannot pin it either.
+        upsert_agent_to_run(base, "new", "t", "builder", AgentStatus::Blocked).unwrap();
+        assert_eq!(spawn_block(base, "new", epoch_secs_now()), None);
     }
 }
